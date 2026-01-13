@@ -1,0 +1,31 @@
+{
+  "name": "strategy-tester",
+  "version": "1.0.0",
+  "description": "Real-time trading backtesting and monitoring tool for Bitquery DEXPool Protobuf Kafka stream",
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "trading",
+    "backtesting",
+    "kafka",
+    "protobuf",
+    "dexpool",
+    "bitquery"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "kafkajs": "^2.2.3",
+    "bitquery-protobuf-schema": "3.1.1",
+    "kafkajs-lz4": "^1.2.1",
+    "lz4": "^0.6.5",
+    "lz4-asm": "^0.4.2",
+    "rxjs": "^7.8.1",
+    "uuid": "^9.0.1",
+    "dotenv": "^16.3.1"
+  }
+}
