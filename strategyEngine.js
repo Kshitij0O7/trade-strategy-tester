@@ -41,94 +41,99 @@ function initializeStrategy(cfg) {
 function extractPoolData(decodedMessage) {
   try {
     // Extract pool currencies - try different possible field names (avoid optional chaining for compatibility)
-    const pool = decodedMessage.Pool || decodedMessage.pool || {};
-    const currencyA = pool.CurrencyA || pool.currencyA || {};
-    const currencyB = pool.CurrencyB || pool.currencyB || {};
-    
-    const addressA = currencyA.SmartContract || currencyA.smartContract || (typeof currencyA === 'string' ? currencyA : '');
-    const addressB = currencyB.SmartContract || currencyB.smartContract || (typeof currencyB === 'string' ? currencyB : '');
+    const poolEvents = decodedMessage.PoolEvents || {};
 
-    // Filter: Only process pools with USDT/WETH pairs
-    if (!isSupportedToken(addressA) || !isSupportedToken(addressB)) {
-      return null; // Skip this pool - not USDT/WETH
-    }
-
-    // Determine direction based on token addresses
-    // If A is WETH and B is USDT, we're trading WETH->USDT (AtoB)
-    // If A is USDT and B is WETH, we're trading USDT->WETH (AtoB) but might want BtoA
-    const isWETHtoUSDT = addressA.toLowerCase() === WETH_ADDRESS.toLowerCase() && 
-                          addressB.toLowerCase() === USDT_ADDRESS.toLowerCase();
-    const isUSDTtoWETH = addressA.toLowerCase() === USDT_ADDRESS.toLowerCase() && 
-                          addressB.toLowerCase() === WETH_ADDRESS.toLowerCase();
-    
-    // Extract pool address from Pool.SmartContract
-    const poolAddress = pool.SmartContract || pool.smartContract || decodedMessage.poolAddress || 'unknown';
-
-    // Extract timestamp from TransactionHeader.Time
-    let timestamp = Date.now();
-    const txHeader = decodedMessage.TransactionHeader || decodedMessage.transactionHeader;
-    if (txHeader && txHeader.Time) {
-      const timeObj = txHeader.Time;
-      // Handle long integer format with low and high
-      if (timeObj.low !== undefined && timeObj.high !== undefined) {
-        // Combine low and high to get full timestamp (milliseconds since epoch)
-        // High part is multiplied by 2^32 (4294967296)
-        timestamp = timeObj.low + (timeObj.high * 4294967296);
-      } else if (typeof timeObj === 'string' || typeof timeObj === 'number') {
-        timestamp = typeof timeObj === 'string' ? parseInt(timeObj) : timeObj;
+    for (const poolEvent of poolEvents) {
+      const pool = poolEvent.Pool || {};
+      const currencyA = pool.CurrencyA || pool.currencyA || {};
+      const currencyB = pool.CurrencyB || pool.currencyB || {};
+      // console.log(poolEvent.PoolPriceTable.AtoBPrices);
+      const addressA = currencyA.SmartContract || '';
+      const addressB = currencyB.SmartContract || '';
+  
+      // Filter: Only process pools with USDT/WETH pairs
+      if (!isSupportedToken(addressA) || !isSupportedToken(addressB)) {
+        return null; // Skip this pool - not USDT/WETH
       }
-    }
-
-    // Extract liquidity
-    const liquidity = (decodedMessage.Liquidity && decodedMessage.Liquidity.AmountCurrencyA) ||
-                     (decodedMessage.liquidity && decodedMessage.liquidity.amountCurrencyA) ||
-                     0;
-
-    // Extract price table
-    const priceTable = decodedMessage.PoolPriceTable || decodedMessage.poolPriceTable || {};
-    const atoBPrices = priceTable.AtoBPrices || priceTable.atoBPrices || [];
-    const btoAPrices = priceTable.BtoAPrices || priceTable.btoAPrices || [];
-
-    // Determine direction and use appropriate price table
-    // For WETH->USDT: use AtoBPrices
-    // For USDT->WETH: use BtoAPrices (reverse direction)
-    let direction = 'AtoB';
-    let slippageBuckets = atoBPrices;
-    
-    if (isUSDTtoWETH) {
-      direction = 'BtoA'; // We want WETH price in terms of USDT, so use BtoA
-      slippageBuckets = btoAPrices;
-    } else if (isWETHtoUSDT) {
-      direction = 'AtoB'; // We want USDT price in terms of WETH, so use AtoB
-      slippageBuckets = atoBPrices;
-    }
-
-    // Build prices object from the appropriate price array
-    const prices = {};
-    slippageBuckets.forEach(bucket => {
-      const bp = bucket.SlippageBasisPoints || bucket.slippageBasisPoints || 0;
-      const price = bucket.Price || bucket.price || null;
-      if (price !== null && price !== undefined) {
-        prices[bp] = price;
+  
+      // Determine direction based on token addresses
+      // If A is WETH and B is USDT, we're trading WETH->USDT (AtoB)
+      // If A is USDT and B is WETH, we're trading USDT->WETH (AtoB) but might want BtoA
+      const isWETHtoUSDT = addressA.toLowerCase() === WETH_ADDRESS.toLowerCase() && 
+                            addressB.toLowerCase() === USDT_ADDRESS.toLowerCase();
+      const isUSDTtoWETH = addressA.toLowerCase() === USDT_ADDRESS.toLowerCase() && 
+                            addressB.toLowerCase() === WETH_ADDRESS.toLowerCase();
+      
+      // Extract pool address from Pool.SmartContract
+      const poolAddress = pool.SmartContract || pool.smartContract || decodedMessage.poolAddress || 'unknown';
+  
+      // Extract timestamp from TransactionHeader.Time
+      let timestamp = Date.now();
+      const txHeader = decodedMessage.TransactionHeader || decodedMessage.transactionHeader;
+      if (txHeader && txHeader.Time) {
+        const timeObj = txHeader.Time;
+        // Handle long integer format with low and high
+        if (timeObj.low !== undefined && timeObj.high !== undefined) {
+          // Combine low and high to get full timestamp (milliseconds since epoch)
+          // High part is multiplied by 2^32 (4294967296)
+          timestamp = timeObj.low + (timeObj.high * 4294967296);
+        } else if (typeof timeObj === 'string' || typeof timeObj === 'number') {
+          timestamp = typeof timeObj === 'string' ? parseInt(timeObj) : timeObj;
+        }
       }
-    });
-
-    const poolData = {
-      poolAddress: poolAddress,
-      tokenA: currencyA,
-      tokenB: currencyB,
-      addressA: addressA,
-      addressB: addressB,
-      liquidity: liquidity,
-      timestamp: timestamp,
-      direction: direction,
-      slippageBuckets: slippageBuckets,
-      prices: prices,
-      isWETHtoUSDT: isWETHtoUSDT,
-      isUSDTtoWETH: isUSDTtoWETH
-    };
-
-    return poolData;
+  
+      // Extract liquidity
+      const liquidity = poolEvent.Liquidity.AmountCurrencyA || 0;
+  
+      // Extract price table
+      const priceTable = poolEvent.PoolPriceTable || {};
+      const atoBPrices = priceTable.AtoBPrices || [];
+      const btoAPrices = priceTable.BtoAPrices || [];
+  
+      // Determine direction and use appropriate price table
+      // For WETH->USDT: use AtoBPrices
+      // For USDT->WETH: use BtoAPrices (reverse direction)
+      let direction = 'AtoB';
+      let slippageBuckets = atoBPrices;
+      
+      if (isUSDTtoWETH) {
+        direction = 'BtoA'; // We want WETH price in terms of USDT, so use BtoA
+        slippageBuckets = btoAPrices;
+      } else if (isWETHtoUSDT) {
+        direction = 'AtoB'; // We want USDT price in terms of WETH, so use AtoB
+        slippageBuckets = atoBPrices;
+      }
+  
+      // Build prices object from the appropriate price array
+      const prices = {};
+      slippageBuckets.forEach(bucket => {
+        const bp = bucket.SlippageBasisPoints || 0;
+        const price = bucket.Price || null;
+        if (price !== null && price !== undefined) {
+          prices[bp] = price;
+        }
+      });
+  
+      const poolData = {
+        poolAddress: poolAddress,
+        tokenA: currencyA,
+        tokenB: currencyB,
+        addressA: addressA,
+        addressB: addressB,
+        liquidity: liquidity,
+        timestamp: timestamp,
+        direction: direction,
+        slippageBuckets: slippageBuckets,
+        prices: prices,
+        isWETHtoUSDT: isWETHtoUSDT,
+        isUSDTtoWETH: isUSDTtoWETH
+      };
+      // console.log(poolData);
+  
+      return poolData;
+    }
+    return null;
+    
   } catch (error) {
     console.error('[StrategyEngine] Error extracting pool data:', error);
     return null;
