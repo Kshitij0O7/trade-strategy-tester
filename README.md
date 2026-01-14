@@ -6,6 +6,8 @@ A real-time trading backtesting and monitoring tool that consumes Bitquery DEXPo
 
 - **Real-time Kafka Stream Consumption**: Connects to Bitquery Kafka streams using SASL authentication
 - **Protobuf Message Decoding**: Decodes DEXPool messages from Bitquery streams
+- **USDT/WETH Pool Filtering**: Only processes pools containing USDT and WETH pairs
+- **Direction-aware Trading**: Uses direction information (AtoB/BtoA) to select appropriate price tables
 - **Trading Strategies**: Implements two trading strategies based on slope calculations
   - **Strategy A**: Single large trade at a fixed slippage (default: 1%)
   - **Strategy B**: Split trade into chunks at smaller slippage (default: 0.5%)
@@ -129,7 +131,7 @@ The application logs:
 [KafkaConsumer] Subscribed to topic: eth.dexpools.proto
 [App] Started consuming messages
 
-[2026-01-12T12:15:22.612Z] Pool: 0xc3f5a24690b51857ff87e95586cad632e145555e, Slope: -0.001234, ΔSlope: -0.000045
+[2026-01-12T12:15:22.612Z] Pool: 0xc3f5a24690b51857ff87e95586cad632e145555e, Direction: WETH->USDT, Slope: -0.001234, ΔSlope: -0.000045
 [Strategy] BUY signal detected (Strategy A, Slope: -0.001234, ΔSlope: -0.000045)
 [Trade] BUY executed: ID=trade-1234567890-1, Amount=1.0, Price=0.009650, Slippage=0.01
 
@@ -183,8 +185,11 @@ Protobuf messages are decoded into JavaScript objects, with bytes fields convert
 
 The strategy engine extracts relevant data from each message:
 - Pool address (`Pool.SmartContract`)
+- Token addresses (`Pool.CurrencyA` and `CurrencyB`)
+- **Filtering**: Only processes pools where both currencies are USDT (0xdac17f958d2ee523a2206206994597c13d831ec7) or WETH (0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2)
+- **Direction detection**: Determines if trading WETH->USDT or USDT->WETH
 - Liquidity information
-- Slippage buckets from `PoolPriceTable.AtoBPrices`
+- Slippage buckets from appropriate price table (`PoolPriceTable.AtoBPrices` or `BtoAPrices`) based on direction
 
 ### 4. Slope Calculation
 

@@ -9,6 +9,19 @@ const slopeHistory = new Map();
 const maxHistorySize = 100;
 let config = null;
 
+// Supported token addresses (USDT and WETH)
+const USDT_ADDRESS = '0xdac17f958d2ee523a2206206994597c13d831ec7';
+const WETH_ADDRESS = '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2';
+
+/**
+ * Checks if a token address matches USDT or WETH
+ */
+function isSupportedToken(address) {
+  if (!address) return false;
+  const addr = address.toLowerCase();
+  return addr === USDT_ADDRESS.toLowerCase() || addr === WETH_ADDRESS.toLowerCase();
+}
+
 /**
  * Initializes the strategy engine with configuration
  */
@@ -18,23 +31,44 @@ function initializeStrategy(cfg) {
 
 /**
  * Extracts relevant pool data from decoded Protobuf message
+ * Filters for USDT/WETH pools only
  * Based on actual message structure:
  * - Pool.SmartContract (pool address)
- * - PoolPriceTable.AtoBPrices (array of price buckets)
+ * - Pool.CurrencyA and CurrencyB (token addresses)
+ * - PoolPriceTable.AtoBPrices and BtoAPrices (direction-specific price buckets)
  * - TransactionHeader.Time (timestamp)
  */
 function extractPoolData(decodedMessage) {
   try {
+    // Extract pool currencies - try different possible field names (avoid optional chaining for compatibility)
+    const pool = decodedMessage.Pool || decodedMessage.pool || {};
+    const currencyA = pool.CurrencyA || pool.currencyA || {};
+    const currencyB = pool.CurrencyB || pool.currencyB || {};
+    
+    const addressA = currencyA.SmartContract || currencyA.smartContract || (typeof currencyA === 'string' ? currencyA : '');
+    const addressB = currencyB.SmartContract || currencyB.smartContract || (typeof currencyB === 'string' ? currencyB : '');
+
+    // Filter: Only process pools with USDT/WETH pairs
+    if (!isSupportedToken(addressA) || !isSupportedToken(addressB)) {
+      return null; // Skip this pool - not USDT/WETH
+    }
+
+    // Determine direction based on token addresses
+    // If A is WETH and B is USDT, we're trading WETH->USDT (AtoB)
+    // If A is USDT and B is WETH, we're trading USDT->WETH (AtoB) but might want BtoA
+    const isWETHtoUSDT = addressA.toLowerCase() === WETH_ADDRESS.toLowerCase() && 
+                          addressB.toLowerCase() === USDT_ADDRESS.toLowerCase();
+    const isUSDTtoWETH = addressA.toLowerCase() === USDT_ADDRESS.toLowerCase() && 
+                          addressB.toLowerCase() === WETH_ADDRESS.toLowerCase();
+    
     // Extract pool address from Pool.SmartContract
-    const poolAddress = decodedMessage.Pool?.SmartContract || 
-                       decodedMessage.pool?.smartContract ||
-                       decodedMessage.poolAddress || 
-                       'unknown';
+    const poolAddress = pool.SmartContract || pool.smartContract || decodedMessage.poolAddress || 'unknown';
 
     // Extract timestamp from TransactionHeader.Time
     let timestamp = Date.now();
-    if (decodedMessage.TransactionHeader?.Time) {
-      const timeObj = decodedMessage.TransactionHeader.Time;
+    const txHeader = decodedMessage.TransactionHeader || decodedMessage.transactionHeader;
+    if (txHeader && txHeader.Time) {
+      const timeObj = txHeader.Time;
       // Handle long integer format with low and high
       if (timeObj.low !== undefined && timeObj.high !== undefined) {
         // Combine low and high to get full timestamp (milliseconds since epoch)
@@ -46,18 +80,32 @@ function extractPoolData(decodedMessage) {
     }
 
     // Extract liquidity
-    const liquidity = decodedMessage.Liquidity?.AmountCurrencyA || 
-                     decodedMessage.liquidity?.amountCurrencyA ||
+    const liquidity = (decodedMessage.Liquidity && decodedMessage.Liquidity.AmountCurrencyA) ||
+                     (decodedMessage.liquidity && decodedMessage.liquidity.amountCurrencyA) ||
                      0;
 
-    // Extract price table - use AtoBPrices for A->B direction
+    // Extract price table
     const priceTable = decodedMessage.PoolPriceTable || decodedMessage.poolPriceTable || {};
     const atoBPrices = priceTable.AtoBPrices || priceTable.atoBPrices || [];
     const btoAPrices = priceTable.BtoAPrices || priceTable.btoAPrices || [];
 
-    // Build prices object from AtoBPrices array
+    // Determine direction and use appropriate price table
+    // For WETH->USDT: use AtoBPrices
+    // For USDT->WETH: use BtoAPrices (reverse direction)
+    let direction = 'AtoB';
+    let slippageBuckets = atoBPrices;
+    
+    if (isUSDTtoWETH) {
+      direction = 'BtoA'; // We want WETH price in terms of USDT, so use BtoA
+      slippageBuckets = btoAPrices;
+    } else if (isWETHtoUSDT) {
+      direction = 'AtoB'; // We want USDT price in terms of WETH, so use AtoB
+      slippageBuckets = atoBPrices;
+    }
+
+    // Build prices object from the appropriate price array
     const prices = {};
-    atoBPrices.forEach(bucket => {
+    slippageBuckets.forEach(bucket => {
       const bp = bucket.SlippageBasisPoints || bucket.slippageBasisPoints || 0;
       const price = bucket.Price || bucket.price || null;
       if (price !== null && price !== undefined) {
@@ -67,12 +115,17 @@ function extractPoolData(decodedMessage) {
 
     const poolData = {
       poolAddress: poolAddress,
-      token0: decodedMessage.Pool?.CurrencyA || decodedMessage.pool?.currencyA || {},
-      token1: decodedMessage.Pool?.CurrencyB || decodedMessage.pool?.currencyB || {},
+      tokenA: currencyA,
+      tokenB: currencyB,
+      addressA: addressA,
+      addressB: addressB,
       liquidity: liquidity,
       timestamp: timestamp,
-      slippageBuckets: atoBPrices, // Use AtoBPrices as slippage buckets
-      prices: prices
+      direction: direction,
+      slippageBuckets: slippageBuckets,
+      prices: prices,
+      isWETHtoUSDT: isWETHtoUSDT,
+      isUSDTtoWETH: isUSDTtoWETH
     };
 
     return poolData;
@@ -198,6 +251,15 @@ function processPoolData(decodedMessage) {
   const slope = calculateSlope(poolData);
   
   if (slope === null) {
+    // Debug: Log why slope is null
+    const priceCount = Object.keys(poolData.prices || {}).length;
+    const bucketCount = (poolData.slippageBuckets || []).length;
+    if (priceCount === 0 && bucketCount > 0) {
+      console.warn(`[StrategyEngine] Slope is null: Found ${bucketCount} buckets but 0 prices extracted. Pool: ${poolData.poolAddress}`);
+    } else if (bucketCount === 0) {
+      console.warn(`[StrategyEngine] Slope is null: No slippage buckets found. Pool: ${poolData.poolAddress}`);
+    }
+    
     return {
       poolData,
       slope: null,

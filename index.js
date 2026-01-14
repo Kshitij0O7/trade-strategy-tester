@@ -59,12 +59,22 @@ async function handleMessage(message) {
     const strategyResult = strategyEngine.processPoolData(decodedMessage);
 
     if (!strategyResult) {
+      // Message was filtered out (not USDT/WETH pool) or extraction failed
       return;
     }
 
     const { poolData, slope, deltaSlope, signal } = strategyResult;
 
-    console.log(`[${timestamp}] Pool: ${poolData.poolAddress}, Slope: ${slope?.toFixed(6) || 'N/A'}, ΔSlope: ${deltaSlope?.toFixed(6) || 'N/A'}`);
+    // Only log if we have valid pool data
+    if (poolData && poolData.poolAddress !== 'unknown') {
+      const directionLabel = poolData.isWETHtoUSDT ? 'WETH->USDT' : (poolData.isUSDTtoWETH ? 'USDT->WETH' : poolData.direction);
+      const slopeStr = slope !== null ? slope.toFixed(6) : 'N/A';
+      const deltaSlopeStr = deltaSlope !== null ? deltaSlope.toFixed(6) : 'N/A';
+      console.log(`[${timestamp}] Pool: ${poolData.poolAddress}, Direction: ${directionLabel}, Slope: ${slopeStr}, ΔSlope: ${deltaSlopeStr}`);
+    } else {
+      // Debug: Log when pool address is unknown
+      console.warn(`[App] Pool address is unknown. Message keys: ${Object.keys(decodedMessage).slice(0, 10).join(', ')}`);
+    }
 
     if (signal) {
       await executeStrategy(signal, poolData, slope, deltaSlope);
