@@ -1,10 +1,10 @@
-# Strategy Tester - Real-time Trading Backtesting Tool
+# Strategy Tester - Real-time Trading Forwardtesting Tool
 
 A real-time trading backtesting and monitoring tool that consumes Bitquery DEXPool Protobuf Kafka streams, processes pool data, and executes trading strategies based on slope calculations from slippage buckets.
 
 ## Features
 
-- **Real-time Kafka Stream Consumption**: Connects to Bitquery Kafka streams using SASL authentication
+- **Real-time Kafka Stream Consumption**: Connects to Bitquery Kafka streams using non-SSL authentication
 - **Protobuf Message Decoding**: Decodes DEXPool messages from Bitquery streams
 - **USDT/WETH Pool Filtering**: Only processes pools containing USDT and WETH pairs
 - **Direction-aware Trading**: Uses direction information (AtoB/BtoA) to select appropriate price tables

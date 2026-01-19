@@ -40,7 +40,7 @@ const config = {
     slippageThresholdA: parseFloat('0.01'), // 1%
     slippageThresholdB: parseFloat('0.005'), // 0.5%
     slopeThreshold: parseFloat('-0.001'), // -0.1%
-    strategy: 'B' // 'A' or 'B'
+    strategy: 'A' // 'A' or 'B'
   }
 };
 
